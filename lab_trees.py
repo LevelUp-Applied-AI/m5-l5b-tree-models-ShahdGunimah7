@@ -354,79 +354,53 @@ def find_tree_vs_linear_disagreement(rf_model, lr_model, X_test_raw,
 
 
 def main():
-    """Orchestrate all 7 lab tasks. Run with: python lab_trees.py"""
     os.makedirs("results", exist_ok=True)
 
-    # Task 1: Load + split
-    result = load_and_split()
-    if not result:
-        print("load_and_split not implemented. Exiting.")
-        return
-    X_train, X_test, y_train, y_test = result
+    X_train, X_test, y_train, y_test = load_and_split()
+
     print(f"Train: {len(X_train)}  Test: {len(X_test)}  Churn rate: {y_train.mean():.2%}")
 
-    # Task 2: Decision tree + calibration comparison
+    # Decision Tree
     dt = build_decision_tree(X_train, y_train)
-    if dt is not None:
-        print(f"\n--- Decision Tree (max_depth=5) ---")
-        print(classification_report(y_test, dt.predict(X_test), zero_division=0))
-        # Plot tree (first 3 levels)
-        plt.figure(figsize=(14, 8))
-        plot_tree(dt, feature_names=NUMERIC_FEATURES, max_depth=3,
-                  filled=True, fontsize=8)
-        plt.savefig("results/decision_tree.png", dpi=100, bbox_inches="tight")
-        plt.close()
+    print("\n--- Decision Tree (max_depth=5) ---")
+    print(classification_report(y_test, dt.predict(X_test), zero_division=0))
+
+    plt.figure(figsize=(14, 8))
+    plot_tree(dt, feature_names=NUMERIC_FEATURES, max_depth=3, filled=True)
+    plt.savefig("results/decision_tree.png")
+    plt.close()
 
     cal = compare_dt_calibration(X_train, X_test, y_train, y_test)
-    if cal:
-        print(f"DT ECE (max_depth=None): {cal['ece_unbounded']:.3f}")
-        print(f"DT ECE (max_depth=5):    {cal['ece_depth_5']:.3f}")
+    print(f"DT ECE (max_depth=None): {cal['ece_unbounded']:.3f}")
+    print(f"DT ECE (max_depth=5):    {cal['ece_depth_5']:.3f}")
 
-    # Task 3: Random forest + feature importances
+    # Random Forest
     rf = build_random_forest(X_train, y_train)
-    if rf is not None:
-        print(f"\n--- Random Forest (max_depth=10) ---")
-        imp = get_feature_importances(rf, NUMERIC_FEATURES)
-        if imp:
-            print("Feature importances:")
-            for name, value in imp.items():
-                print(f"  {name:<22s} {value:.3f}")
 
-    # Task 4: Balanced RF + recall@0.5 comparison + PR-AUC
+    print("\n--- Classification report: RF default ---")
+    print(classification_report(y_test, rf.predict(X_test), zero_division=0))
+
     rf_bal = build_random_forest(X_train, y_train, class_weight="balanced")
-    if rf is not None and rf_bal is not None:
-        r_def = evaluate_recall_at_threshold(rf, X_test, y_test, threshold=0.5)
-        r_bal = evaluate_recall_at_threshold(rf_bal, X_test, y_test, threshold=0.5)
-        print(f"\n--- class_weight effect at default 0.5 threshold ---")
-        print(f"  RF default recall@0.5:  {r_def:.3f}")
-        print(f"  RF balanced recall@0.5: {r_bal:.3f}  (ratio: {r_bal / max(r_def, 1e-9):.2f}x)")
 
-        auc_def = compute_pr_auc(rf, X_test, y_test)
-        auc_bal = compute_pr_auc(rf_bal, X_test, y_test)
-        print(f"\n--- PR-AUC (threshold-independent ranking quality) ---")
-        print(f"  RF default:  {auc_def:.3f}")
-        print(f"  RF balanced: {auc_bal:.3f}")
-        print("Note: class_weight='balanced' shifts the operating point at a fixed "
-              "threshold; it does not improve the underlying ranking (PR-AUC).")
+    print("\n--- Classification report: RF balanced ---")
+    print(classification_report(y_test, rf_bal.predict(X_test), zero_division=0))
 
-        # Task 5: PR curves + calibration curves
-        plot_pr_curves(rf, rf_bal, X_test, y_test, "results/pr_curves.png")
-        plot_calibration_curves(rf, rf_bal, X_test, y_test, "results/calibration_curves.png")
+    # Recall + PR-AUC
+    r_def = evaluate_recall_at_threshold(rf, X_test, y_test)
+    r_bal = evaluate_recall_at_threshold(rf_bal, X_test, y_test)
 
-    # Task 6: Tree-vs-linear disagreement
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    lr = build_logistic_regression(X_train_scaled, y_train)
-    if rf is not None and lr is not None:
-        d = find_tree_vs_linear_disagreement(
-            rf, lr, X_test, X_test_scaled, y_test, NUMERIC_FEATURES
-        )
-        if d:
-            print(f"\n--- Tree-vs-linear disagreement (sample idx={d['sample_idx']}) ---")
-            print(f"  RF P(churn=1)={d['rf_proba']:.3f}  LR P(churn=1)={d['lr_proba']:.3f}")
-            print(f"  |diff| = {d['prob_diff']:.3f}   true label = {d['true_label']}")
-            print(f"  Feature values: {d['feature_values']}")
+    print(f"\nRF default recall@0.5: {r_def:.3f}")
+    print(f"RF balanced recall@0.5: {r_bal:.3f}")
+
+    auc_def = compute_pr_auc(rf, X_test, y_test)
+    auc_bal = compute_pr_auc(rf_bal, X_test, y_test)
+
+    print(f"\nRF default PR-AUC: {auc_def:.3f}")
+    print(f"RF balanced PR-AUC: {auc_bal:.3f}")
+
+    # Plots
+    plot_pr_curves(rf, rf_bal, X_test, y_test, "results/pr_curves.png")
+    plot_calibration_curves(rf, rf_bal, X_test, y_test, "results/calibration_curves.png")
 
 
 if __name__ == "__main__":
